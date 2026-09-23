@@ -1,6 +1,7 @@
-"""Top-level orchestration: Stage -1 -> (Stage 0a / 0b / 0c / Stage 1+2)
-per segment, with a durable, structured log of every routing decision.
-This is the reusable entry point a consuming project calls.
+"""Top-level orchestration: Stage -1 -> (Stage 0 scope gate / 0a / 0b /
+0c / Stage 1+2) per segment, with a durable, structured log of every
+routing decision. This is the reusable entry point a consuming project
+calls.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from . import decision_log
 from .classifier import Classifier
 from .fact_lookup import match_fact
 from .knowledge_resolver import KNOWLEDGE_RESOLVER_CONFIDENCE, KnowledgeResolver, NullKnowledgeResolver
+from .scope_gate import match_scope_gate
 from .schema import IntentCategory, MultiRouteResult, RouteDecision, Signals, Tier
 from .segmentation import segment_request
 from .template_prefilter import match_template
@@ -24,6 +26,7 @@ logger = logging.getLogger("intent_router")
 ROUTE_TEMPLATE = "template-no-model-call"
 ROUTE_FACT_LOOKUP = "deterministic-lookup-no-model-call"
 ROUTE_KNOWLEDGE_RESOLVER = "rag-grounded-low-tier"
+ROUTE_SCOPE_REJECTED = "reject-out-of-scope-notify-user"
 
 _TIER_ORDER = [Tier.TRIVIAL, Tier.LOW, Tier.MODERATE, Tier.HIGH]
 
@@ -93,6 +96,23 @@ def _route_segment(
     log_path: Optional[Path],
 ) -> RouteDecision:
     request = {"text": segment_text, **(request_extra or {})}
+
+    scope_match = match_scope_gate(segment_text)
+    if scope_match is not None:
+        decision = RouteDecision(
+            segment_text=segment_text,
+            intent_category=IntentCategory.OTHER,  # not applicable -- rejected before classification
+            signals=Signals(),
+            confidence=1.0,
+            tier=Tier.TRIVIAL,
+            tier_reason=f"matched out-of-scope denylist phrase '{scope_match.matched_phrase}': {scope_match.reason}",
+            route=ROUTE_SCOPE_REJECTED,
+            model_version="none",
+            stage="scope_gate",
+            timestamp=_now_iso(),
+            request_id=request_id,
+        )
+        return _finalize(decision, log_path)
 
     template_match = match_template(request)
     if template_match is not None:

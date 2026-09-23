@@ -3,6 +3,7 @@ from .fact_lookup import match_fact, register_fact, registered_questions as regi
 from .knowledge_resolver import KnowledgeResolver, NullKnowledgeResolver
 from .orchestrator import route, route_request
 from .schema import ClassifierOutput, IntentCategory, MultiRouteResult, RouteDecision, Signals, Tier
+from .scope_gate import match_scope_gate, register_out_of_scope_phrase, registered_phrases as registered_scope_gate_phrases
 from .segmentation import segment_request
 from .template_prefilter import register_template, registered_operations as registered_template_operations
 
@@ -25,4 +26,7 @@ __all__ = [
     "segment_request",
     "KnowledgeResolver",
     "NullKnowledgeResolver",
+    "match_scope_gate",
+    "register_out_of_scope_phrase",
+    "registered_scope_gate_phrases",
 ]

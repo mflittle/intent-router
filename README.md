@@ -26,10 +26,16 @@ a compound request never gets one blended (and possibly wrong) decision.
 request -> [Stage -1: segmentation] -- split into independent segments
                     |
                     v  (per segment)
+           [Stage 0: scope gate] -- out of scope / non-actionable? --> rejected, notify user, no model call
+                    |  in scope
+                    v
            [Stage 0a: template pre-filter] -- templatable transform? --> handled directly, no model call
                     |  no match
                     v
            [Stage 0b: fact lookup] -- known fact? --> handled directly, no model call
+                    |  no match
+                    v
+           [Stage 0c: knowledge resolver] -- internal knowledge base match? --> LOW tier, grounded answer
                     |  no match
                     v
            [Stage 1: classifier] -- intent category + risk signals
@@ -38,7 +44,7 @@ request -> [Stage -1: segmentation] -- split into independent segments
            [Stage 2: tier policy] -- deterministic signals -> tier
                     |
                     v
-           route to model tier, with a structured decision log
+           route to model tier, with a durable, structured decision log
 
 overall result = one RouteDecision per segment, plus the max tier across all of them
 ```
@@ -58,6 +64,23 @@ avoid. Splitting itself needs no model call, which matters for the
 project's own thesis: "no AI needed" can apply to detecting multiple
 intents, not just to what happens after.
 
+**Stage 0 -- `router/scope_gate.py`**
+Runs first, before any other Stage 0 check. A deterministic denylist for
+requests -- or fragments of a request -- that ask for something this
+system was never built to do: a physical-world action ("get lunch",
+"walk the dog"), or anything clearly outside its intent categories.
+Without this stage, that kind of request falls to `IntentCategory.OTHER`
+in the classifier, which Stage 2 treats as a cautious default -> `high`,
+frontier-tier, human-in-the-loop -- the worst possible outcome for a
+nonsensical request, since it spends the most expensive tier on
+something no tier should attempt. Unlike Stage 0a/0b, this is a
+substring match (an out-of-scope fragment is usually embedded in an
+otherwise-legitimate sentence, not the whole segment), so the denylist
+stays small and curated to keep false positives rare -- a false negative
+here just falls through to the existing `OTHER` -> cautious-`high`
+backstop, which remains the right catch-all for genuinely ambiguous
+requests this stage doesn't (and shouldn't try to) catch.
+
 **Stage 0a -- `router/template_prefilter.py`**
 A deterministic allowlist of known-safe, mechanically templatable
 operations. Not a heuristic for "this looks simple" -- an exact-match
@@ -73,6 +96,21 @@ registrable answer ("who is the compliance officer"), as opposed to a
 transformation to perform. Same allowlist discipline as Stage 0a -- an
 exact, normalized match against a registry, never a heuristic guess that
 a question "looks simple". Starts empty for the same reason.
+
+**Stage 0c -- `router/knowledge_resolver.py`**
+Extension point for grounding QA-style questions in an internal
+knowledge base (a RAG pipeline) when Stage 0b's exact-match registry
+misses -- e.g. a VP name that wasn't hand-registered. Deliberately
+stubbed (`NullKnowledgeResolver`) rather than built out; wiring in a
+real vector store is its own project. Important distinction from Stage
+0a/0b: a knowledge-resolver match is NOT a zero-model-call bypass --
+retrieval is close to deterministic, but turning retrieved context into
+an answer still needs a (usually cheap) model call, so it routes `low`,
+not `trivial`. Also deliberately does not fall back to live internet
+search when it misses -- that's a materially different risk profile
+(external data egress, unverified sources) and would need its own
+explicit signal/gating rather than being silently bolted onto a `low`
+tier's default behavior.
 
 **Stage 1 -- `router/classifier.py`**
 Classifies intent into a small, fixed category set and extracts five
@@ -146,10 +184,10 @@ tradeoff is favorable.
 
 ## Status
 
-Stages -1, 0a, 0b, 1 (stub), and 2 are implemented and tested (28 unit
-tests). The live Bedrock/GLM-backed classifier (replacing
-`StubClassifier`) and its governance wrapper are the next milestone --
-see `config/settings.py`.
+Stages -1, 0 (scope gate), 0a, 0b, 0c (stub), 1 (stub), and 2 are
+implemented and tested (38 unit tests). The live Bedrock/GLM-backed
+classifier (replacing `StubClassifier`) and its governance wrapper are
+the next milestone -- see `config/settings.py`.
 
 Multi-intent requests are handled: `router.route_request(text,
 classifier)` segments the input and returns a `MultiRouteResult` with
@@ -157,6 +195,12 @@ one `RouteDecision` per segment plus an `overall_tier` (the max across
 segments). `router.route(request, classifier)` remains available as a
 single-segment convenience wrapper for callers that already know they
 have exactly one intent (e.g. a pre-tagged template operation call).
+
+Every routing decision is written durably to an append-only JSONL log
+(`router/decision_log.py`, default `logs/decisions.jsonl`), keyed by a
+`request_id` shared across all segments of one compound request -- this
+is the actual data the tier-policy thresholds and the classifier itself
+should eventually be tuned against, not just an audit trail.
 
 ## Running tests
 
