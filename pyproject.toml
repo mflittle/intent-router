@@ -1,0 +1,9 @@
+[project]
+name = "intent-router"
+version = "0.1.0"
+description = "Deterministic-first intent classification and model-tier routing"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
