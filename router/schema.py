@@ -76,8 +76,9 @@ class RouteDecision:
     tier_reason: str
     route: str
     model_version: str
-    stage: str  # "template" | "fact_lookup" | "classifier"
+    stage: str  # "template" | "fact_lookup" | "knowledge_resolver" | "classifier"
     timestamp: str
+    request_id: str  # ties segments of one compound request together in the decision log
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class MultiRouteResult:
     across segments, for callers that just want "what's the most
     capability this request needs anywhere in it".
     """
+    request_id: str
     segments: tuple[RouteDecision, ...]
     overall_tier: Tier
     timestamp: str

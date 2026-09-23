@@ -1,5 +1,6 @@
 from .classifier import Classifier, StubClassifier
 from .fact_lookup import match_fact, register_fact, registered_questions as registered_fact_questions
+from .knowledge_resolver import KnowledgeResolver, NullKnowledgeResolver
 from .orchestrator import route, route_request
 from .schema import ClassifierOutput, IntentCategory, MultiRouteResult, RouteDecision, Signals, Tier
 from .segmentation import segment_request
@@ -22,4 +23,6 @@ __all__ = [
     "match_fact",
     "registered_fact_questions",
     "segment_request",
+    "KnowledgeResolver",
+    "NullKnowledgeResolver",
 ]
