@@ -18,10 +18,18 @@ request actually needs.
 
 ## Architecture
 
-Three stages, each independently testable:
+Five stages, each independently testable. A request is segmented first,
+then every segment runs the deterministic-first pipeline independently --
+a compound request never gets one blended (and possibly wrong) decision.
 
 ```
-request -> [Stage 0: template pre-filter] -- trivial? --> handled directly, no model call
+request -> [Stage -1: segmentation] -- split into independent segments
+                    |
+                    v  (per segment)
+           [Stage 0a: template pre-filter] -- templatable transform? --> handled directly, no model call
+                    |  no match
+                    v
+           [Stage 0b: fact lookup] -- known fact? --> handled directly, no model call
                     |  no match
                     v
            [Stage 1: classifier] -- intent category + risk signals
@@ -31,14 +39,40 @@ request -> [Stage 0: template pre-filter] -- trivial? --> handled directly, no m
                     |
                     v
            route to model tier, with a structured decision log
+
+overall result = one RouteDecision per segment, plus the max tier across all of them
 ```
 
-**Stage 0 -- `router/template_prefilter.py`**
+**Stage -1 -- `router/segmentation.py`**
+Deterministic, rule-based splitting of a compound request ("summarize
+this filing and also draft a note to external counsel") into independent
+segments, before any routing happens. Conservative by design: it only
+splits on unambiguous separators (newlines, semicolons, explicit
+connectors like "and also" / "and then") and never on a bare "and" --
+"review and approve the memo" stays one segment. A false negative here
+(a compound request treated as one segment) just means its signals get
+combined and it may route a tier higher than strictly necessary -- safe.
+A false positive (splitting one coherent request into unrelated pieces)
+would misrepresent what was actually asked, which this stage is built to
+avoid. Splitting itself needs no model call, which matters for the
+project's own thesis: "no AI needed" can apply to detecting multiple
+intents, not just to what happens after.
+
+**Stage 0a -- `router/template_prefilter.py`**
 A deterministic allowlist of known-safe, mechanically templatable
 operations. Not a heuristic for "this looks simple" -- an exact-match
 registry, because false positives here (treating a real task as trivial)
 mean it skips model review entirely. Starts empty; grows only as real,
-recurring trivial operations justify an entry.
+recurring trivial operations justify an entry. Requires the caller to
+supply an explicit `operation` key -- it never infers "templatable" from
+free text.
+
+**Stage 0b -- `router/fact_lookup.py`**
+The other flavor of "no model needed": a known factual question with a
+registrable answer ("who is the compliance officer"), as opposed to a
+transformation to perform. Same allowlist discipline as Stage 0a -- an
+exact, normalized match against a registry, never a heuristic guess that
+a question "looks simple". Starts empty for the same reason.
 
 **Stage 1 -- `router/classifier.py`**
 Classifies intent into a small, fixed category set and extracts five
@@ -112,9 +146,17 @@ tradeoff is favorable.
 
 ## Status
 
-Stages 0, 1 (stub), and 2 are implemented and tested. The live
-Bedrock/GLM-backed classifier (replacing `StubClassifier`) and its
-governance wrapper are the next milestone -- see `config/settings.py`.
+Stages -1, 0a, 0b, 1 (stub), and 2 are implemented and tested (28 unit
+tests). The live Bedrock/GLM-backed classifier (replacing
+`StubClassifier`) and its governance wrapper are the next milestone --
+see `config/settings.py`.
+
+Multi-intent requests are handled: `router.route_request(text,
+classifier)` segments the input and returns a `MultiRouteResult` with
+one `RouteDecision` per segment plus an `overall_tier` (the max across
+segments). `router.route(request, classifier)` remains available as a
+single-segment convenience wrapper for callers that already know they
+have exactly one intent (e.g. a pre-tagged template operation call).
 
 ## Running tests
 

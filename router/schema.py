@@ -1,16 +1,18 @@
 """Shared data contracts for the intent classification + routing pipeline.
 
-These types are the interface between the three pipeline stages:
-  Stage 0 (template_prefilter) -> bypasses the rest entirely
-  Stage 1 (classifier)         -> produces a ClassifierOutput
-  Stage 2 (tier_policy)        -> consumes ClassifierOutput, produces a tier
+These types are the interface between the pipeline stages:
+  Stage -1 (segmentation)      -> splits a request into independent segments
+  Stage 0a (template_prefilter)-> per-segment: templatable transform? bypass
+  Stage 0b (fact_lookup)       -> per-segment: known fact? bypass
+  Stage 1 (classifier)         -> per-segment: produces a ClassifierOutput
+  Stage 2 (tier_policy)        -> per-segment: signals -> tier
 
 Keeping this in one module means the router, the classifier, and the tests
 all agree on one shape.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -65,7 +67,8 @@ class ClassifierOutput:
 
 @dataclass(frozen=True)
 class RouteDecision:
-    """Final output of the full pipeline, and the audit record for it."""
+    """Final output of routing ONE segment, and the audit record for it."""
+    segment_text: str
     intent_category: IntentCategory
     signals: Signals
     confidence: float
@@ -73,5 +76,20 @@ class RouteDecision:
     tier_reason: str
     route: str
     model_version: str
-    stage: str  # "template" | "classifier"
+    stage: str  # "template" | "fact_lookup" | "classifier"
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class MultiRouteResult:
+    """Final output of routing a full (possibly compound) request.
+
+    `segments` holds one RouteDecision per independently-routed sub-intent
+    -- a single-intent request still produces a one-element list, so
+    callers always deal with the same shape. `overall_tier` is the max
+    across segments, for callers that just want "what's the most
+    capability this request needs anywhere in it".
+    """
+    segments: tuple[RouteDecision, ...]
+    overall_tier: Tier
     timestamp: str
