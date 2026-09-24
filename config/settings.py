@@ -37,3 +37,22 @@ DECISION_LOG_DESTINATION = "REPLACE_WITH_PRODUCTION_LOG_SINK"
 # response before giving up and letting the orchestrator's fail-safe
 # (cautious HIGH-tier default) take over. See router/bedrock_classifier.py.
 CLASSIFIER_MAX_RETRIES = 1
+
+# --- Stage 3 (execution): tier -> model bindings ---
+#
+# LOW stays on GLM (router/glm_executor.py, boto3 Converse API) -- same
+# model as the classifier, consistent with the LOW tier's premise.
+#
+# MODERATE and HIGH stay on one governed vendor (Claude) rather than
+# adding a third vendor relationship -- see README for the reasoning.
+# They're deliberately different sizes within that one vendor: Haiku for
+# MODERATE, Sonnet for HIGH. Both go through router/claude_executor.py,
+# which uses the Anthropic Messages API via Bedrock (NOT boto3 Converse
+# -- see that module's docstring for why, and the fact that this is
+# UNVERIFIED against a live endpoint as of this writing).
+MODERATE_MODEL_ID = "anthropic.claude-haiku-4-5"
+HIGH_MODEL_ID = "anthropic.claude-sonnet-5"
+
+# HIGH tier's human-in-the-loop is an enforced gate, not just a label:
+# router/execution.py does not auto-invoke HIGH_MODEL_ID by default. See
+# execute_request()'s force_execute parameter for the explicit override.

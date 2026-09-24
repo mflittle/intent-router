@@ -111,6 +111,10 @@ def _route_segment(
             stage="scope_gate",
             timestamp=_now_iso(),
             request_id=request_id,
+            output=(
+                f"This request isn't something this system can help with "
+                f"(matched: '{scope_match.matched_phrase}')."
+            ),
         )
         return _finalize(decision, log_path)
 
@@ -128,6 +132,7 @@ def _route_segment(
             stage="template",
             timestamp=_now_iso(),
             request_id=request_id,
+            output=template_match.output,
         )
         return _finalize(decision, log_path)
 
@@ -145,6 +150,7 @@ def _route_segment(
             stage="fact_lookup",
             timestamp=_now_iso(),
             request_id=request_id,
+            output=fact_match.answer,
         )
         return _finalize(decision, log_path)
 
@@ -165,6 +171,7 @@ def _route_segment(
             stage="knowledge_resolver",
             timestamp=_now_iso(),
             request_id=request_id,
+            output=knowledge_answer,
         )
         return _finalize(decision, log_path)
 

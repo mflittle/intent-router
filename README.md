@@ -45,8 +45,13 @@ request -> [Stage -1: segmentation] -- split into independent segments
                     |
                     v
            route to model tier, with a durable, structured decision log
+                    |
+                    v
+           [Stage 3: execution] -- actually perform the task at the routed tier
+                    (TRIVIAL: passes through Stage 0's already-computed output
+                     HIGH: gated -- not auto-executed without explicit override)
 
-overall result = one RouteDecision per segment, plus the max tier across all of them
+overall result = one RouteDecision (+ ExecutionResult once executed) per segment
 ```
 
 **Stage -1 -- `router/segmentation.py`**
@@ -223,12 +228,52 @@ tradeoff is favorable.
 
 ## Status
 
-Stages -1, 0 (scope gate), 0a, 0b, 0c (stub), 1 (both `StubClassifier`
-and the live `BedrockGLMClassifier`), and 2 are implemented and tested
-(50 unit tests). `BedrockGLMClassifier` has been verified against real Bedrock
-(a personal AWS account, not FINRA's) via `scripts/smoke_test_bedrock.py`
-and `scripts/smoke_test_pipeline.py` -- both run real, billed API calls
-and are excluded from the pytest suite for that reason.
+Stages -1 through 2 (segmentation, scope gate, 0a/0b/0c, classifier, tier
+policy) are implemented and tested. `BedrockGLMClassifier` (the live
+Stage 1) has been verified against real Bedrock via
+`scripts/smoke_test_bedrock.py` and `scripts/smoke_test_pipeline.py`.
+
+**Stage 3 -- `router/execution.py`, `router/glm_executor.py`,
+`router/claude_executor.py`** (new): completes the loop from
+classify/route to actually performing the task.
+
+- `Executor` (`router/executor.py`) is the interface -- deliberately
+  separate from `Classifier`, since classification and execution are
+  different jobs even when LOW tier happens to use the same model (GLM)
+  for both.
+- LOW tier executes on GLM (`GLMBedrockExecutor`), same boto3 Converse
+  API path as the classifier.
+- MODERATE and HIGH execute on Claude, kept on one governed vendor
+  rather than adding a third -- Haiku for MODERATE, Sonnet for HIGH
+  (`MODERATE_MODEL_ID`/`HIGH_MODEL_ID` in `config/settings.py`).
+- **Important, unverified as of this writing:** `ClaudeBedrockExecutor`
+  uses the Anthropic Messages API via the `anthropic` package's
+  `AnthropicBedrockMantle` client, hitting a `bedrock-mantle` endpoint --
+  NOT boto3's Converse API, which is what GLM uses. This is per current
+  Anthropic documentation, but conflicts with one AWS model-card page
+  that suggested Converse is also supported for Claude Haiku via an
+  inference-profile ID. Verify with `scripts/smoke_test_execution.py`
+  before relying on this -- see that script's docstring and
+  `router/claude_executor.py`'s docstring for the full reasoning.
+- **HIGH tier's human-in-the-loop is an enforced gate, not just a route
+  label**: `execute_request()` does not auto-invoke the HIGH executor by
+  default -- it returns a result with `human_review_required=True` and
+  `output=None`, naming which model *would* run without running it. A
+  caller passes `force_execute_high=True` to actually execute it,
+  intended to happen only after a human has reviewed the routing
+  decision (intent, signals, tier_reason) and decided to proceed.
+
+61 unit tests pass, all without `boto3` or `anthropic` installed --
+both are imported lazily and every executor/classifier accepts an
+injectable fake client for testing, so the parsing/validation/dispatch
+logic is fully covered without a live network call or either dependency
+present.
+
+Live-verified end to end (a personal AWS account, not FINRA's):
+`scripts/smoke_test_bedrock.py` (Stage 1 only), `scripts/smoke_test_pipeline.py`
+(Stages -1 through 2 end to end), and `scripts/smoke_test_execution.py`
+(the full loop, Stage 3 included) -- all three make real, billed API
+calls and are excluded from the pytest suite for that reason.
 
 Multi-intent requests are handled: `router.route_request(text,
 classifier)` segments the input and returns a `MultiRouteResult` with
