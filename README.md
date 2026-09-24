@@ -64,6 +64,19 @@ avoid. Splitting itself needs no model call, which matters for the
 project's own thesis: "no AI needed" can apply to detecting multiple
 intents, not just to what happens after.
 
+One deliberate exception to that conservatism: a serial comma list
+("summarize this brief, send it to the judge, and get lunch") splits on
+2+ commas. This is a real, accepted trade-off, not a free improvement --
+a sentence using 2+ commas for some other grammatical reason
+("summarize this, in plain English, for the board") gets incorrectly
+split too (see `test_two_incidental_commas_still_split_known_tradeoff`
+in `tests/test_segmentation.py`, which exists specifically so that cost
+stays visible rather than being a silent surprise). It was judged worth
+it because the alternative is worse in a common real case: without it,
+an out-of-scope fragment (Stage 0's scope gate) anywhere in an unsplit
+compound request causes the *entire* request to be rejected, even when
+most of it was legitimate.
+
 **Stage 0 -- `router/scope_gate.py`**
 Runs first, before any other Stage 0 check. A deterministic denylist for
 requests -- or fragments of a request -- that ask for something this
@@ -212,10 +225,10 @@ tradeoff is favorable.
 
 Stages -1, 0 (scope gate), 0a, 0b, 0c (stub), 1 (both `StubClassifier`
 and the live `BedrockGLMClassifier`), and 2 are implemented and tested
-(46 unit tests). `BedrockGLMClassifier` is untested against real Bedrock
--- it needs real AWS credentials with the IAM scope described above,
-provisioned in an environment that can actually reach your org's Bedrock
-access, which this development environment does not have.
+(50 unit tests). `BedrockGLMClassifier` has been verified against real Bedrock
+(a personal AWS account, not FINRA's) via `scripts/smoke_test_bedrock.py`
+and `scripts/smoke_test_pipeline.py` -- both run real, billed API calls
+and are excluded from the pytest suite for that reason.
 
 Multi-intent requests are handled: `router.route_request(text,
 classifier)` segments the input and returns a `MultiRouteResult` with
