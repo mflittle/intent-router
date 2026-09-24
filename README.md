@@ -236,3 +236,18 @@ should eventually be tuned against, not just an audit trail.
 pip install -r requirements.txt
 pytest
 ```
+
+## Verifying live Bedrock access
+
+`pytest` never makes a real network call -- `tests/test_bedrock_classifier.py`
+exercises `BedrockGLMClassifier` entirely against a fake, injected client.
+To confirm real AWS/Bedrock access works end to end (after `aws configure`
+locally with credentials scoped to `bedrock:InvokeModel`/`Converse` on
+`zai.glm-5` -- see `config/settings.py`):
+
+```
+python3 scripts/smoke_test_bedrock.py
+```
+
+This makes real, billed API calls and is intentionally excluded from the
+automated test suite for that reason.
