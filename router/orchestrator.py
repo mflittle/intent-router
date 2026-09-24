@@ -168,7 +168,7 @@ def _route_segment(
         )
         return _finalize(decision, log_path)
 
-    classifier_output = classifier.classify(segment_text)
+    classifier_output = _classify_with_failsafe(classifier, segment_text)
     tier, reason = decide_tier(classifier_output)
 
     decision = RouteDecision(
@@ -185,6 +185,29 @@ def _route_segment(
         request_id=request_id,
     )
     return _finalize(decision, log_path)
+
+
+def _classify_with_failsafe(classifier: Classifier, segment_text: str):
+    """Run the classifier, and if it raises (network error, or it
+    exhausted its own retries on invalid output -- see
+    bedrock_classifier.py), fail safe rather than crash the pipeline:
+    treat it the same as an unclassifiable OTHER result, which Stage 2
+    already routes to a cautious HIGH default. A classifier failure is
+    exactly the situation that default exists for.
+    """
+    from .schema import ClassifierOutput
+
+    try:
+        return classifier.classify(segment_text)
+    except Exception as e:  # noqa: BLE001 -- deliberately broad: any classifier failure fails safe
+        logger.warning("classifier invocation failed, routing cautiously: %s", e)
+        model_version = getattr(classifier, "model_id", "unknown")
+        return ClassifierOutput(
+            intent_category=IntentCategory.OTHER,
+            signals=Signals(),
+            confidence=0.0,
+            model_version=f"{model_version} (classifier failure: {e})",
+        )
 
 
 def _finalize(decision: RouteDecision, log_path: Optional[Path]) -> RouteDecision:

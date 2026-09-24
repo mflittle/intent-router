@@ -112,31 +112,57 @@ search when it misses -- that's a materially different risk profile
 explicit signal/gating rather than being silently bolted onto a `low`
 tier's default behavior.
 
-**Stage 1 -- `router/classifier.py`**
+**Stage 1 -- `router/classifier.py` (dev) / `router/bedrock_classifier.py` (live)**
 Classifies intent into a small, fixed category set and extracts five
 boolean risk signals (`external_facing`, `legal_compliance_exposure`,
 `irreversible_or_costly_error`, `multi_step_reasoning`,
 `domain_expertise_required`). Deliberately does **not** output a tier --
-see below. Ships with `StubClassifier`, a keyword-based stand-in that
-lets the router be built and tested before any live model call. The
-intended production classifier is an open-weight model (GLM, chosen for
-its permissive MIT license and agentic-planning strength) run on AWS
-Bedrock, behind a governance wrapper:
+see below.
 
-- **Sandboxed** -- least-privilege IAM role scoped to `InvokeModel` on
-  one pinned model only, no broader access.
-- **Versioned** -- an exact, pinned Bedrock model version string, never
-  `latest`; every decision log records which version handled it.
-- **Monitored** -- every classification is logged (input, output,
-  confidence, model version, timestamp).
-- **Enforced output space** -- classifier output is validated against
-  the fixed label set on the way out; anything outside it is
-  rejected/retried rather than passed through. This is what makes the
-  "bounded output space carries less misuse risk" argument a property of
-  the system rather than an assertion about it -- see the note on
-  alignment-stripping ("abliteration") research below.
+`StubClassifier` (`router/classifier.py`) is a keyword-based stand-in
+that let the router be built and tested before any live model call.
 
-Config placeholders for the live classifier live in `config/settings.py`.
+`BedrockGLMClassifier` (`router/bedrock_classifier.py`) is the live
+implementation: GLM 5 on AWS Bedrock (model ID `zai.glm-5`, verified
+against AWS's own Bedrock model card, not assumed -- Bedrock model IDs
+and availability do change, so re-check before relying on this),
+chosen as an open-weight model for its permissive MIT license and
+agentic-planning strength, behind a governance wrapper:
+
+- **Sandboxed** -- least-privilege IAM role scoped to `InvokeModel`/
+  `Converse` on one pinned model only, no broader access. ARN placeholder
+  in `config/settings.py`, FINRA-specific, fill in once provisioned.
+- **Versioned** -- an exact, pinned Bedrock model ID, never a floating
+  `latest` alias (`BEDROCK_MODEL_ID` in `config/settings.py`); every
+  decision log entry records which version handled it.
+- **Monitored** -- every classification is durably logged via
+  `router/decision_log.py` (input, output, confidence, model version,
+  timestamp, and a `request_id` tying multi-intent segments together).
+- **Enforced output space** -- the response is parsed and validated
+  against the fixed `IntentCategory` set and the `Signals` schema on the
+  way out. An invalid or unparseable response is retried once with a
+  corrective prompt (`CLASSIFIER_MAX_RETRIES` in `config/settings.py`);
+  if it still doesn't validate, `BedrockGLMClassifier.classify()` raises
+  rather than silently guessing or passing through unvalidated model
+  output. This is what makes "bounded output space carries less misuse
+  risk" an enforced property of the system rather than an assertion
+  about it -- see the note on alignment-stripping ("abliteration")
+  research below.
+- **Fails safe, not closed** -- the orchestrator wraps every classifier
+  call (`_classify_with_failsafe` in `orchestrator.py`). If the live
+  classifier raises -- a network error, or exhausted retries on invalid
+  output -- the segment is routed the same way an unclassifiable `OTHER`
+  result is: cautious `HIGH` tier, human-in-the-loop, rather than
+  crashing the pipeline or silently defaulting to something cheaper.
+
+**A note on testing this without live AWS access:** `BedrockGLMClassifier`
+accepts an injectable `client` (anything with a Bedrock Converse-API-shaped
+`.converse()` method), so `tests/test_bedrock_classifier.py` verifies the
+parsing/validation/retry logic entirely against a fake client -- `boto3`
+is imported lazily and is never required unless a real client is actually
+constructed. Wiring this up against real Bedrock requires valid AWS
+credentials with the IAM permissions above, provisioned in your own
+environment -- that hasn't been done yet.
 
 **Stage 2 -- `router/tier_policy.py`**
 A pure function: `ClassifierOutput -> (Tier, reason)`. No model call, no
@@ -184,10 +210,12 @@ tradeoff is favorable.
 
 ## Status
 
-Stages -1, 0 (scope gate), 0a, 0b, 0c (stub), 1 (stub), and 2 are
-implemented and tested (38 unit tests). The live Bedrock/GLM-backed
-classifier (replacing `StubClassifier`) and its governance wrapper are
-the next milestone -- see `config/settings.py`.
+Stages -1, 0 (scope gate), 0a, 0b, 0c (stub), 1 (both `StubClassifier`
+and the live `BedrockGLMClassifier`), and 2 are implemented and tested
+(46 unit tests). `BedrockGLMClassifier` is untested against real Bedrock
+-- it needs real AWS credentials with the IAM scope described above,
+provisioned in an environment that can actually reach your org's Bedrock
+access, which this development environment does not have.
 
 Multi-intent requests are handled: `router.route_request(text,
 classifier)` segments the input and returns a `MultiRouteResult` with
