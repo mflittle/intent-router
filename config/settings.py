@@ -47,11 +47,30 @@ CLASSIFIER_MAX_RETRIES = 1
 # adding a third vendor relationship -- see README for the reasoning.
 # They're deliberately different sizes within that one vendor: Haiku for
 # MODERATE, Sonnet for HIGH. Both go through router/claude_executor.py,
-# which uses the Anthropic Messages API via Bedrock (NOT boto3 Converse
-# -- see that module's docstring for why, and the fact that this is
-# UNVERIFIED against a live endpoint as of this writing).
-MODERATE_MODEL_ID = "anthropic.claude-haiku-4-5"
-HIGH_MODEL_ID = "anthropic.claude-sonnet-5"
+# via boto3's bedrock-runtime Converse API -- same pattern as GLM.
+#
+# IMPORTANT: these MUST be cross-region INFERENCE PROFILE IDs, not bare
+# model IDs. Verified live (2026-09-25) via AWS CLI: a bare model ID
+# ("anthropic.claude-haiku-4-5-20251001-v1:0") fails with
+# "on-demand throughput isn't supported"; the "us." inference-profile
+# form succeeds. This is a genuine Bedrock requirement for these models
+# on Converse -- confirmed against a live endpoint, not assumed from docs
+# (Anthropic's own docs claimed bare IDs were sufficient; they were wrong
+# for this account/path).
+MODERATE_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+# HIGH_MODEL_ID -- resolved 2026-09-25 by testing candidates live, not
+# guessing. Claude Sonnet 5 and Opus 4.8 (the newest flagships) both
+# returned AccessDeniedException "not available for this account" on
+# this account regardless of model-ID form -- genuine account-tier
+# entitlement, not something IAM/Marketplace permissions fix (the error
+# itself points to AWS Sales, not a console setting). Claude Sonnet 4.6
+# separately failed on an AWS Marketplace subscription error, distinct
+# from the entitlement gate above. Claude Opus 4.5 and Sonnet 4.5 both
+# invoked successfully -- Opus 4.5 chosen for HIGH: a genuine frontier
+# model, live on this account today, reserved for real high-stakes work
+# behind the human-in-the-loop gate below.
+HIGH_MODEL_ID = "us.anthropic.claude-opus-4-5-20251101-v1:0"
 
 # HIGH tier's human-in-the-loop is an enforced gate, not just a label:
 # router/execution.py does not auto-invoke HIGH_MODEL_ID by default. See

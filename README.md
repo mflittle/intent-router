@@ -246,15 +246,25 @@ classify/route to actually performing the task.
 - MODERATE and HIGH execute on Claude, kept on one governed vendor
   rather than adding a third -- Haiku for MODERATE, Sonnet for HIGH
   (`MODERATE_MODEL_ID`/`HIGH_MODEL_ID` in `config/settings.py`).
-- **Important, unverified as of this writing:** `ClaudeBedrockExecutor`
-  uses the Anthropic Messages API via the `anthropic` package's
-  `AnthropicBedrockMantle` client, hitting a `bedrock-mantle` endpoint --
-  NOT boto3's Converse API, which is what GLM uses. This is per current
-  Anthropic documentation, but conflicts with one AWS model-card page
-  that suggested Converse is also supported for Claude Haiku via an
-  inference-profile ID. Verify with `scripts/smoke_test_execution.py`
-  before relying on this -- see that script's docstring and
-  `router/claude_executor.py`'s docstring for the full reasoning.
+- **Verified live (2026-09-25):** `ClaudeBedrockExecutor` uses boto3's
+  bedrock-runtime Converse API -- the same path GLM uses, not a separate
+  Anthropic-SDK path. That separate path was the original design,
+  following Anthropic's own docs, but a live AWS CLI test proved those
+  docs incomplete for this account: a bare model ID
+  (`anthropic.claude-haiku-4-5-20251001-v1:0`) fails Converse with
+  "on-demand throughput isn't supported," while the cross-region
+  inference profile ID (`us.anthropic.claude-haiku-4-5-20251001-v1:0`)
+  succeeds. `MODERATE_MODEL_ID`/`HIGH_MODEL_ID` in `config/settings.py`
+  must be inference profile IDs, not bare model IDs.
+- **HIGH tier runs Claude Opus 4.5, not Sonnet 5.** Live testing
+  (2026-09-25) found Sonnet 5 and Opus 4.8 both return
+  `AccessDeniedException: not available for this account` on this
+  account regardless of model-ID form -- genuine account-tier
+  entitlement (the error points to AWS Sales), not an IAM/Marketplace
+  permissions gap. Opus 4.5 and Sonnet 4.5 both invoked successfully;
+  Opus 4.5 was chosen for HIGH as the strongest currently-available
+  model, kept behind the same human-in-the-loop gate. If your account's
+  entitlements change, swap `HIGH_MODEL_ID` in `config/settings.py`.
 - **HIGH tier's human-in-the-loop is an enforced gate, not just a route
   label**: `execute_request()` does not auto-invoke the HIGH executor by
   default -- it returns a result with `human_review_required=True` and

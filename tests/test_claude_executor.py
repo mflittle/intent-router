@@ -1,38 +1,46 @@
 from router.claude_executor import ClaudeBedrockExecutor
 
 
-class _FakeTextBlock:
-    def __init__(self, text):
-        self.type = "text"
-        self.text = text
-
-
-class _FakeMessage:
-    def __init__(self, text):
-        self.content = [_FakeTextBlock(text)]
-
-
-class _FakeMessages:
+class _FakeBedrockClient:
     def __init__(self, text):
         self._text = text
         self.calls = []
 
-    def create(self, **kwargs):
+    def converse(self, **kwargs):
         self.calls.append(kwargs)
-        return _FakeMessage(self._text)
-
-
-class _FakeAnthropicBedrockClient:
-    def __init__(self, text):
-        self.messages = _FakeMessages(text)
+        return {
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"text": self._text}],
+                }
+            }
+        }
 
 
 def test_execute_returns_generated_text():
-    client = _FakeAnthropicBedrockClient("Here is the summary for counsel.")
-    executor = ClaudeBedrockExecutor(model_id="anthropic.claude-test", region="us-east-1", client=client)
+    client = _FakeBedrockClient("Here is the summary for counsel.")
+    executor = ClaudeBedrockExecutor(
+        model_id="us.anthropic.claude-test-v1:0", region="us-east-1", client=client
+    )
 
     output = executor.execute("summarize this exam finding")
 
     assert output == "Here is the summary for counsel."
-    assert client.messages.calls[0]["model"] == "anthropic.claude-test"
-    assert client.messages.calls[0]["messages"][0]["content"] == "summarize this exam finding"
+    call = client.calls[0]
+    assert call["modelId"] == "us.anthropic.claude-test-v1:0"
+    assert call["messages"][0]["content"] == [{"text": "summarize this exam finding"}]
+
+
+def test_execute_passes_max_tokens_in_inference_config():
+    client = _FakeBedrockClient("ok")
+    executor = ClaudeBedrockExecutor(
+        model_id="us.anthropic.claude-test-v1:0",
+        region="us-east-1",
+        client=client,
+        max_tokens=256,
+    )
+
+    executor.execute("do the thing")
+
+    assert client.calls[0]["inferenceConfig"]["maxTokens"] == 256

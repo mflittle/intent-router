@@ -3,15 +3,14 @@
 GLM and Claude models on Bedrock -- one request per tier (LOW/MODERATE
 always run; HIGH only runs its executor with --force-high).
 
-THIS IS WHERE THE UNVERIFIED CLAUDE-ON-BEDROCK PATH GETS TESTED FOR
-REAL. router/claude_executor.py uses the Anthropic Messages API via the
-AnthropicBedrockMantle client (per Anthropic's own docs), NOT boto3's
-Converse API -- a genuinely different invocation path than GLM's, and
-one that conflicting documentation made it worth verifying rather than
-assuming. If this fails specifically on the MODERATE or --force-high
-HIGH request (not the LOW one), that's the signal something about the
-Claude-on-Bedrock path needs adjusting -- check the error and
-router/claude_executor.py's docstring for context.
+router/claude_executor.py uses boto3's bedrock-runtime Converse API,
+same as GLM's executor, with one confirmed wrinkle: MODERATE/HIGH
+require cross-region INFERENCE PROFILE IDs (see config/settings.py),
+not bare model IDs -- verified live via AWS CLI on 2026-09-25 after the
+bare-ID form failed with "on-demand throughput isn't supported". If
+this fails on the MODERATE or --force-high HIGH request, check that
+config/settings.py's MODERATE_MODEL_ID / HIGH_MODEL_ID are still valid,
+current inference profile IDs for your account/region.
 
 Run locally, after `aws configure`:
 
